@@ -1,0 +1,15 @@
+activities: [0, 13, 9]
+progress: 1 out of 1
+finishedactivities: [0, 13, 9]
+progress: 1 out of 1
+finishedactivities: [0, 13, 9]
+progress: 1 out of 1
+finishedactivities: [0, 13, 9]
+progress: 1 out of 1
+finishedactivities: [0, 13, 9]
+progress: 1 out of 1
+finishedactivities: [0, 13, 9]
+progress: 1 out of 1
+finishedactivities: [0, 13, 9]
+progress: 1 out of 1
+finished

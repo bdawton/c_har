@@ -1,0 +1,19 @@
+walking = A = 0
+jogging = B = 1
+stairs = C = 2
+sitting = D = 3
+standing = E = 4
+typing = F = 5
+teeth = G = 6
+soup = H = 7
+chips = I = 8
+pasta = J = 9
+drinking = K = 10
+sandwich = L = 17
+kicking = M = 11
+catch = O = 12
+dribbling = P = 13
+writing = Q = 14
+clapping = R = 15
+folding = S = 16
+
