@@ -1,6 +1,8 @@
 import glob
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import math
 import tailored_prs as prs
 from quantiser import quantiser
 from scipy import signal
@@ -34,8 +36,11 @@ rate = 20
 N = int(rate * sim_t)
 f_sim = rate
 f_prs = rate
-sample_freq = f_prs / 4
-f_cutoff = sample_freq / 2
+sample_freq = f_prs  # Is this enough here? This means no subsampling I think
+f_cutoff_low = sample_freq / 2
+f_cutoff_bp_low = sample_freq / 4
+f_cutoff_bp_high = 3 * sample_freq / 4
+f_cutoff_high = sample_freq / 2
 
 n_subject_ids = 0
 min_slices = 10
@@ -43,7 +48,7 @@ min_slices = 10
 count_track_var = 1
 final_count_track_var = len(nhoa_arr) * len(ghoa_arr) * len(ehoa_arr)
 total_accuracy_list = []
-validation_iter = 10
+validation_iter = 1
 
 spread_columns = ['x_spread', 'y_spread', 'z_spread']
 filtered_columns = ['x_filtered', 'y_filtered', 'z_filtered']
@@ -51,13 +56,44 @@ sampled_columns = ['x_sampled', 'y_sampled', 'z_sampled']
 quant_sampled_columns = ['x_q_sampled', 'y_q_sampled', 'z_q_sampled']
 sensor_list = glob.glob('wisdm-dataset-modified/raw/watch/accel' + '/*')
 
-# PRS generation parameters
-lf_prs_params = {'p_1': 0.85, 'd_1': 0, 'k_1': 0, 'p_2': 666, 'd_2': 666, 'k_2': 666, 'seq_num': 1}
-mf_prs_params = {'p_1': 0.9, 'd_1': 0, 'k_1': 0, 'p_2': 0.9, 'd_2': 0, 'k_2': 1, 'seq_num': 2}
-hf_prs_params = {'p_1': 0.1, 'd_1': 0, 'k_1': 1, 'p_2': 666, 'd_2': 666, 'k_2': 666, 'seq_num': 1}
-bb_prs_params = {'p_1': 0.5, 'd_1': 0, 'k_1': 0, 'p_2': 666, 'd_2': 666, 'k_2': 666, 'seq_num': 1}
 
+# == Analogue filters == # CLEAN THIS UP OBVIOUSLY DO I NEED AN EXAMPLE FLAT RESPONSE? NO RIGHT?
 
+BILLY FROM HERE, LPF SEEMS OK, OTHER TWO DONT. I WONDER IF I CAN DESIGN THE FILTERS IN MATLAB AND BRING THEM ACROSS TO HERE IF NEED BE?
+
+lpf = signal.butter(4, f_cutoff_low / 6.283, btype='lowpass', analog=True) #/6.283 to convert from rads to Hz
+w, h = signal.freqs(lpf[0], lpf[1])
+plt.plot(w, 20 * np.log10(abs(h)))
+plt.title('Butterworth filter frequency response')
+plt.xlabel('Frequency Hz')
+plt.ylabel('Amplitude [dB]')
+plt.margins(0, 0.1)
+plt.grid(which='both', axis='both')
+#plt.axvline(f_cutoff, color='green')  # cutoff frequency
+plt.show()
+
+bpf = signal.butter(4, [f_cutoff_bp_low / 6.283,(f_cutoff_bp_high )/ 6.283] , btype='bandpass', analog=True)
+w, h = signal.freqs(bpf[0], bpf[1])
+plt.plot(w, 20 * np.log10(abs(h)))
+plt.title('Butterworth filter frequency response')
+plt.xlabel('Frequency Hz')
+plt.ylabel('Amplitude [dB]')
+plt.margins(0, 0.1)
+plt.grid(which='both', axis='both')
+#plt.axvline(f_cutoff, color='green')  # cutoff frequency
+plt.show()
+
+hpf = signal.butter(4, (f_cutoff_high +10 )/ 6.283, btype='highpass', analog=True)
+w, h = signal.freqs(hpf[0], hpf[1])
+plt.plot(w, 20 * np.log10(abs(h)))
+plt.title('Butterworth filter frequency response')
+plt.xlabel('Frequency Hz')
+plt.ylabel('Amplitude [dB]')
+plt.margins(0, 0.1)
+plt.grid(which='both', axis='both')
+#plt.axvline(f_cutoff, color='green')  # cutoff frequency
+plt.show()
+print('toto')
 # == Functions ==
 def load_prepare(raw_data, n_ids=0):
     # Load in sensor data
@@ -166,64 +202,25 @@ def slice_and_drop(prepared_data, min_slices_per_activity):
     return df_prepared_data
 
 
-def create_prs_sequences(x_params, y_params, z_params, t, sim_freq, prs_freq):
-    prs_sequences_dict = {}
-    sequence = np.zeros(int(sim_freq * t))
-    for axis, params in zip(['x', 'y', 'z'], [x_params, y_params, z_params]):
-        sequence_root_1 = prs.prs(params['p_1'], params['d_1'], params['k_1'], t, prs_freq, 0)
-        sequence_1 = np.tile(sequence_root_1, int(sim_freq / prs_freq))
-        sequence_root_2 = prs.prs(params['p_2'], params['d_2'], params['k_2'], t, prs_freq, 0)
-        sequence_2 = np.tile(sequence_root_2, int(sim_freq / prs_freq))
-        seq_num = params['seq_num']
-        if seq_num == 1:
-            sequence = sequence_1
-        elif seq_num == 2:
-            sequence = sequence_1 * sequence_2
-        prs_sequences_dict[axis] = sequence
+def analogue_filter_assign(row):
 
-    return prs_sequences_dict
+    filtered = 'lol'
 
-
-def demodulate_assign(row):
-    if row['axis'] == 'x':
-        x_demodulated = prs_sequences['x'] * row['sensor_reading']
-        return x_demodulated
-    elif row['axis'] == 'y':
-        y_demodulated = prs_sequences['y'] * row['sensor_reading']
-        return y_demodulated
-    elif row['axis'] == 'z':
-        z_demodulated = prs_sequences['z'] * row['sensor_reading']
-        return z_demodulated
-
-
-def filter_assign(row):
-    lpf = signal.butter(2,  # order
-                        f_cutoff,  # -3db freq
-                        btype='lowpass',
-                        fs=f_prs,  # sampling frequency
-                        )
-    filtered = signal.lfilter(lpf[0], lpf[1], row['demodulated_sensor_reading'], axis=0)
     return filtered
 
 
-def sample_quantise_assign(row):
+def quantise_assign(row):
     bit_depth = 12
     dec_points = 5
-    scaling_factor = int(f_sim / f_prs)
-    downsample_interval = int(scaling_factor * f_prs / sample_freq)
-    start = 0
-    sampled = row['lpf_demodulated_sensor_readings'][start::downsample_interval]
-    sampled_quantised = quantiser(sampled, bit_depth, axis=1, dec_points=dec_points)
-    return sampled_quantised
+    quantised = quantiser(row, bit_depth, axis=1, dec_points=dec_points)
+    return quantised
 
 
 three_act_list, three_act_array = three_activity_selection(nhoa_arr, ghoa_arr, ehoa_arr)
 loaded_prepared_data, act_label_list = load_prepare(sensor_list, n_subject_ids)
 df_data = slice_and_drop(loaded_prepared_data, min_slices)
-prs_sequences = create_prs_sequences(lf_prs_params, hf_prs_params, hf_prs_params, sim_t, f_sim, f_prs)
-df_data['demodulated_sensor_reading'] = df_data.apply(lambda row: demodulate_assign(row), axis=1)
-df_data['lpf_demodulated_sensor_readings'] = df_data.apply(lambda row: filter_assign(row), axis=1)
-df_data['compressive_measurements'] = df_data.apply(lambda row: sample_quantise_assign(row), axis=1)
+df_data['analog_filtered'] = df_data.apply(lambda row: analogue_filter_assign(row), axis=1)
+df_data['analog_filtered_quantised'] = df_data.apply(lambda row: quantise_assign(row), axis=1)
 
 extracted_features, feature_names = extract_features(np.stack(df_data['compressive_measurements']), shape=0,
                                                      axis=1)  # Convert pd.Series of arrays into single big np.array
@@ -246,7 +243,7 @@ feature_dataset = data = np.squeeze(np.array(three_axis_feature_list))
 df_feature_dataset = pd.DataFrame({'subjectid': three_axis_subject_list, 'activity': three_axis_activity_list})
 df_feature_dataset[three_axis_feature_names] = feature_dataset
 
-for three_act_group in three_act_list:
+for three_act_group in three_act_list[0:4]:
 
     df_three_act_dataset = df_feature_dataset[df_feature_dataset['activity'].isin(three_act_group)]
     labels = df_three_act_dataset["activity"]
@@ -301,7 +298,7 @@ for three_act_group in three_act_list:
     count_track_var = count_track_var + 1
 
 df_output_log = pd.DataFrame(
-    zip(three_act_array[:, 0], three_act_array[:, 1], three_act_array[:, 2], total_accuracy_list),
+    zip(three_act_array[:4, 0], three_act_array[:4, 1], three_act_array[:4, 2], total_accuracy_list),
     columns=['non_hand', 'general_hand', 'eating_hand',
              'total_accuracy'])
 
