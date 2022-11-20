@@ -79,7 +79,7 @@ for entry in accel_watch_list:
 big_data_column_names = ['subjectid', 'activity', 'timestamp', 'x', 'y', 'z']
 df_big_data_accel_watch = pd.concat(big_data_accel_watch)
 df_big_data_accel_watch.columns = big_data_column_names
-df_big_data_accel_watch.dropna(axis=0, how="any", thresh=None, subset=None, inplace=True)
+df_big_data_accel_watch.dropna(axis=0, how="any", subset=None, inplace=True)
 df_big_data_accel_watch = df_big_data_accel_watch.replace('\n', '', regex=True)
 df_big_data_accel_watch = df_big_data_accel_watch.astype({"subjectid": str})
 
@@ -116,7 +116,7 @@ for pull_subject in watch_accel_drop_subject:
         watch_accel_pull_subject.append(pull_subject)
 
 # Toggle the line below to switch between all and 4 subjects
-watch_accel_drop_subject = watch_accel_pull_subject
+#watch_accel_drop_subject = watch_accel_pull_subject
 
 # Non-hand-oriented activities:
 # {walking, jogging, stairs, sitting, standing, kicking}
@@ -128,13 +128,13 @@ nhoa_arr = np.array([0])
 # {dribbling, playing catch, typing, writing, clapping, brushing teeth, folding clothes}
 
 #ghoa_arr = np.array([13, 12, 5, 14, 15, 6, 16])
-ghoa_arr = np.array([13])
+ghoa_arr = np.array([5])
 
 # Eating hand-oriented activities:
 # {eating pasta, eating soup, eating sandwich, eating chips, drinking}
 
 #ehoa_arr = np.array([9, 7, 17, 8, 10])
-ehoa_arr = np.array([9])
+ehoa_arr = np.array([7,8,9,10])
 
 
 count_track_var = 1
@@ -337,6 +337,7 @@ for nh_a in nhoa_arr:
                         [s_id])]  # use [] to make s_id list and use with .isin so it spits out dataframe
                     print(f'iter: {iter}')
                     print(f's_id: {s_id}')
+                    print(f"pull_list: {pull_list}")
                     # model_1 = SVC(kernel='linear')
                     model_2 = RandomForestClassifier(
                         n_estimators=1000,
@@ -353,6 +354,9 @@ for nh_a in nhoa_arr:
                                                                                       random_state=r_s)
 
                     s_id_conf_mat += conf_mat
+                    i = i+1
+                    print(f"i: {i}")
+
 
                 iter_conf_mat += s_id_conf_mat
             # print("iter_conf_mat:")
