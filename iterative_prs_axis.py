@@ -40,9 +40,6 @@ f_cutoff = sample_freq / 2
 n_subject_ids = 0
 min_slices = 10
 
-count_track_var = 1
-final_count_track_var = len(nhoa_arr) * len(ghoa_arr) * len(ehoa_arr)
-total_accuracy_list = []
 validation_iter = 10
 
 sensor_list = glob.glob('wisdm-dataset-modified/raw/watch/accel' + '/*')
@@ -52,6 +49,12 @@ lf_prs_params = {'p_1': 0.85, 'd_1': 0, 'k_1': 0, 'p_2': 666, 'd_2': 666, 'k_2':
 mf_prs_params = {'p_1': 0.9, 'd_1': 0, 'k_1': 0, 'p_2': 0.9, 'd_2': 0, 'k_2': 1, 'seq_num': 2}
 hf_prs_params = {'p_1': 0.1, 'd_1': 0, 'k_1': 1, 'p_2': 666, 'd_2': 666, 'k_2': 666, 'seq_num': 1}
 bb_prs_params = {'p_1': 0.5, 'd_1': 0, 'k_1': 0, 'p_2': 666, 'd_2': 666, 'k_2': 666, 'seq_num': 1}
+
+params_list = [lf_prs_params, mf_prs_params, hf_prs_params, bb_prs_params]
+
+count_track_var = 1
+final_count_track_var = len(nhoa_arr) * len(ghoa_arr) * len(ehoa_arr) * len(params_list)
+dict_output_log = {}
 
 
 # == Functions ==
@@ -214,95 +217,101 @@ def sample_quantise_assign(row):
 
 # == Simulation ==
 
-three_act_list, three_act_array = three_activity_selection(nhoa_arr, ghoa_arr, ehoa_arr)
-loaded_prepared_data, act_label_list = load_prepare(sensor_list, n_subject_ids)
-df_data = slice_and_drop(loaded_prepared_data, min_slices)
-prs_sequences = create_prs_sequences(lf_prs_params, hf_prs_params, hf_prs_params, sim_t, f_sim, f_prs)
-df_data['demodulated_sensor_reading'] = df_data.apply(lambda row: demodulate_assign(row), axis=1)
-df_data['lpf_demodulated_sensor_readings'] = df_data.apply(lambda row: filter_assign(row), axis=1)
-df_data['compressive_measurements'] = df_data.apply(lambda row: sample_quantise_assign(row), axis=1)
+# We are testing every set of parameteres on each axis, we are not matching the filtering parameters to axis in this code
+for params_set, param_name in zip(params_list, ['lf', 'mf', 'hf', 'bb']):
 
-extracted_features, feature_names = extract_features(np.stack(df_data['compressive_measurements']), shape=0,
-                                                     axis=1)  # Convert pd.Series of arrays into single big np.array
-df_data[feature_names] = extracted_features
+    three_act_list, three_act_array = three_activity_selection(nhoa_arr, ghoa_arr, ehoa_arr)
+    loaded_prepared_data, act_label_list = load_prepare(sensor_list, n_subject_ids)
+    df_data = slice_and_drop(loaded_prepared_data, min_slices)
+    prs_sequences = create_prs_sequences(params_set, params_set, params_set, sim_t, f_sim, f_prs)
+    df_data['demodulated_sensor_reading'] = df_data.apply(lambda row: demodulate_assign(row), axis=1)
+    df_data['lpf_demodulated_sensor_readings'] = df_data.apply(lambda row: filter_assign(row), axis=1)
+    df_data['compressive_measurements'] = df_data.apply(lambda row: sample_quantise_assign(row), axis=1)
 
-three_axis_feature_list = []
-three_axis_activity_list = []
-three_axis_subject_list = []
+    extracted_features, feature_names = extract_features(np.stack(df_data['compressive_measurements']), shape=0,
+                                                         axis=1)  # Convert pd.Series of arrays into single big np.array
+    df_data[feature_names] = extracted_features
 
-for uniq_timestamp in df_data['timestamp'].unique():
-    sub_sample = df_data[df_data['timestamp'] == uniq_timestamp]
-    sub_sample_features = np.resize(np.array(sub_sample[feature_names]), (1, 15))
-    three_axis_feature_list.append(sub_sample_features)
-    three_axis_activity_list.append(sub_sample['activity'].unique()[0])
-    three_axis_subject_list.append(sub_sample['subjectid'].unique()[0])
+    three_axis_feature_list = []
+    three_axis_activity_list = []
+    three_axis_subject_list = []
 
-three_axis_feature_names = [letter + feature_name for letter in ['x_', 'y_', 'z_'] for feature_name in feature_names]
-feature_dataset_columns = ['subjectid', 'activity'] + three_axis_feature_names
-feature_dataset = np.squeeze(np.array(three_axis_feature_list))
-df_feature_dataset = pd.DataFrame({'subjectid': three_axis_subject_list, 'activity': three_axis_activity_list})
-df_feature_dataset[three_axis_feature_names] = feature_dataset
+    for uniq_timestamp in df_data['timestamp'].unique():
+        sub_sample = df_data[df_data['timestamp'] == uniq_timestamp]
+        sub_sample_features = np.resize(np.array(sub_sample[feature_names]), (1, 15))
+        three_axis_feature_list.append(sub_sample_features)
+        three_axis_activity_list.append(sub_sample['activity'].unique()[0])
+        three_axis_subject_list.append(sub_sample['subjectid'].unique()[0])
 
-for three_act_group in three_act_list:
+    three_axis_feature_names = [letter + feature_name for letter in ['x_', 'y_', 'z_'] for feature_name in
+                                feature_names]
+    feature_dataset_columns = ['subjectid', 'activity'] + three_axis_feature_names
+    feature_dataset = np.squeeze(np.array(three_axis_feature_list))
+    df_feature_dataset = pd.DataFrame({'subjectid': three_axis_subject_list, 'activity': three_axis_activity_list})
+    df_feature_dataset[three_axis_feature_names] = feature_dataset
 
-    df_three_act_dataset = df_feature_dataset[df_feature_dataset['activity'].isin(three_act_group)]
-    labels = df_three_act_dataset["activity"]
-    sub_ids = df_three_act_dataset["subjectid"]
-    features = df_three_act_dataset[three_axis_feature_names]
-    sub_ids_list = sub_ids.unique()
+    total_accuracy_list = []  # We need to reinitalise this every parameter loop
 
-    final_conf_mat = np.zeros([np.size(np.unique(labels)), np.size(np.unique(labels))], dtype=int)
+    for three_act_group in three_act_list:
 
-    for iteration in range(validation_iter):
-        pull_index = 0
-        iter_conf_mat = np.zeros([np.size(np.unique(labels)), np.size(np.unique(labels))], dtype=int)
+        df_three_act_dataset = df_feature_dataset[df_feature_dataset['activity'].isin(three_act_group)]
+        labels = df_three_act_dataset["activity"]
+        sub_ids = df_three_act_dataset["subjectid"]
+        features = df_three_act_dataset[three_axis_feature_names]
+        sub_ids_list = sub_ids.unique()
 
-        for s_id in sub_ids_list:
-            pull_list = np.delete(sub_ids_list, pull_index)
-            X_train = features[sub_ids.isin(pull_list)]
-            X_test = features[
-                sub_ids.isin([s_id])]  # Use [] to make s_id list and use with .isin so it outputs dataframe
-            y_train = labels[sub_ids.isin(pull_list)]
-            y_test = labels[
-                sub_ids.isin([s_id])]  # Use [] to make s_id list and use with .isin so it outputs dataframe
-            print(f'iter: {iteration}')
-            print(f's_id: {s_id}')
-            print(f"pull_list: {pull_list}")
-            model = RandomForestClassifier(
-                n_estimators=1000,
-                min_samples_leaf=3,
-                random_state=r_s,
-                n_jobs=-1,
-            )
+        final_conf_mat = np.zeros([np.size(np.unique(labels)), np.size(np.unique(labels))], dtype=int)
 
-            score, conf_mat, fit_model, y_pred, y_true, unused_var = validate(X_train, y_train, X_test,
-                                                                              y_test, model,
-                                                                              random_state=r_s)
-            iter_conf_mat += conf_mat
-            pull_index = pull_index + 1
-        final_conf_mat += iter_conf_mat
+        for iteration in range(validation_iter):
+            pull_index = 0
+            iter_conf_mat = np.zeros([np.size(np.unique(labels)), np.size(np.unique(labels))], dtype=int)
 
-    total_accuracy = iter_conf_mat.diagonal().sum() / iter_conf_mat.sum()
-    total_accuracy_list.append(total_accuracy)
-    print('total accuracy: ')
-    print(total_accuracy)
+            for s_id in sub_ids_list:
+                pull_list = np.delete(sub_ids_list, pull_index)
+                X_train = features[sub_ids.isin(pull_list)]
+                X_test = features[
+                    sub_ids.isin([s_id])]  # Use [] to make s_id list and use with .isin so it outputs dataframe
+                y_train = labels[sub_ids.isin(pull_list)]
+                y_test = labels[
+                    sub_ids.isin([s_id])]  # Use [] to make s_id list and use with .isin so it outputs dataframe
+                print(f'iter: {iteration}')
+                print(f's_id: {s_id}')
+                print(f"pull_list: {pull_list}")
+                model = RandomForestClassifier(
+                    n_estimators=1000,
+                    min_samples_leaf=3,
+                    random_state=r_s,
+                    n_jobs=-1,
+                )
 
-    print(f"progress: {count_track_var} out of {final_count_track_var}")
+                score, conf_mat, fit_model, y_pred, y_true, unused_var = validate(X_train, y_train, X_test,
+                                                                                  y_test, model,
+                                                                                  random_state=r_s)
+                iter_conf_mat += conf_mat
+                pull_index = pull_index + 1
+            final_conf_mat += iter_conf_mat
 
-    with open("log.txt", "a") as text_file:
-        text_file.write(f"activities: {three_act_group}")
-        text_file.write("\n")
-        text_file.write(f"progress: {count_track_var} out of {final_count_track_var}")
-        text_file.write("\n")
+        total_accuracy = iter_conf_mat.diagonal().sum() / iter_conf_mat.sum()
+        total_accuracy_list.append(total_accuracy)
+        print('total accuracy: ')
+        print(total_accuracy)
 
-    count_track_var = count_track_var + 1
+        print(f"progress: {count_track_var} out of {final_count_track_var}")
 
-df_output_log = pd.DataFrame(
-    zip(three_act_array[:, 0], three_act_array[:, 1], three_act_array[:, 2], total_accuracy_list),
-    columns=['non_hand', 'general_hand', 'eating_hand',
-             'total_accuracy'])
+        with open("log.txt", "a") as text_file:
+            text_file.write(f"activities: {three_act_group}")
+            text_file.write("\n")
+            text_file.write(f"progress: {count_track_var} out of {final_count_track_var}")
+            text_file.write("\n")
 
-df_output_log.to_excel('output_log.xlsx')
+        count_track_var = count_track_var + 1
+
+    df_output_log = pd.DataFrame(
+        zip(three_act_array[:, 0], three_act_array[:, 1], three_act_array[:, 2], total_accuracy_list),
+        columns=['non_hand', 'general_hand', 'eating_hand',
+                 'total_accuracy'])
+    dict_output_log[param_name] = df_output_log
+    df_output_log.to_excel(f'output_log_{param_name}.xlsx')
 
 with open("log.txt", "a") as text_file:
     text_file.write("finished")

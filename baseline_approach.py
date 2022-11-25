@@ -1,9 +1,6 @@
 import glob
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import math
-import tailored_prs as prs
 from quantiser import quantiser
 from scipy import signal
 from sklearn.ensemble import RandomForestClassifier
@@ -34,13 +31,10 @@ rnd.seed(r_s)
 sim_t = 10.0
 rate = 20
 N = int(rate * sim_t)
+t_plot = np.linspace(0, sim_t, N, endpoint=False)
 f_sim = rate
 f_prs = rate
-sample_freq = f_prs  # Is this enough here? This means no subsampling I think
-f_cutoff_low = sample_freq / 2
-f_cutoff_bp_low = sample_freq / 4
-f_cutoff_bp_high = 3 * sample_freq / 4
-f_cutoff_high = sample_freq / 2
+sample_freq = f_sim / 2  # Is this enough here? This means no subsampling I think
 
 n_subject_ids = 0
 min_slices = 10
@@ -50,50 +44,47 @@ final_count_track_var = len(nhoa_arr) * len(ghoa_arr) * len(ehoa_arr)
 total_accuracy_list = []
 validation_iter = 1
 
-spread_columns = ['x_spread', 'y_spread', 'z_spread']
-filtered_columns = ['x_filtered', 'y_filtered', 'z_filtered']
-sampled_columns = ['x_sampled', 'y_sampled', 'z_sampled']
-quant_sampled_columns = ['x_q_sampled', 'y_q_sampled', 'z_q_sampled']
-sensor_list = glob.glob('wisdm-dataset-modified/raw/watch/accel' + '/*')
+sensor_list = glob.glob('wisdm-dataset-modified/raw/watch/gyro' + '/*')
 
 
-# == Analogue filters == # CLEAN THIS UP OBVIOUSLY DO I NEED AN EXAMPLE FLAT RESPONSE? NO RIGHT?
+# == Analogue filters == #
 
-BILLY FROM HERE, LPF SEEMS OK, OTHER TWO DONT. I WONDER IF I CAN DESIGN THE FILTERS IN MATLAB AND BRING THEM ACROSS TO HERE IF NEED BE?
+def butter_highpass_filter(input, cutoff, fs, order):
+    [b, a] = signal.butter(order, cutoff, fs=fs, btype='highpass', analog=False)
+    y = signal.lfilter(b, a, input)
+    return y
 
-lpf = signal.butter(4, f_cutoff_low / 6.283, btype='lowpass', analog=True) #/6.283 to convert from rads to Hz
-w, h = signal.freqs(lpf[0], lpf[1])
-plt.plot(w, 20 * np.log10(abs(h)))
-plt.title('Butterworth filter frequency response')
-plt.xlabel('Frequency Hz')
-plt.ylabel('Amplitude [dB]')
-plt.margins(0, 0.1)
-plt.grid(which='both', axis='both')
-#plt.axvline(f_cutoff, color='green')  # cutoff frequency
-plt.show()
 
-bpf = signal.butter(4, [f_cutoff_bp_low / 6.283,(f_cutoff_bp_high )/ 6.283] , btype='bandpass', analog=True)
-w, h = signal.freqs(bpf[0], bpf[1])
-plt.plot(w, 20 * np.log10(abs(h)))
-plt.title('Butterworth filter frequency response')
-plt.xlabel('Frequency Hz')
-plt.ylabel('Amplitude [dB]')
-plt.margins(0, 0.1)
-plt.grid(which='both', axis='both')
-#plt.axvline(f_cutoff, color='green')  # cutoff frequency
-plt.show()
+def butter_lowpass_filter(input, cutoff, fs, order):
+    [b, a] = signal.butter(order, cutoff, fs=fs, btype='lowpass', analog=False)
+    y = signal.lfilter(b, a, input)
+    return y
 
-hpf = signal.butter(4, (f_cutoff_high +10 )/ 6.283, btype='highpass', analog=True)
-w, h = signal.freqs(hpf[0], hpf[1])
-plt.plot(w, 20 * np.log10(abs(h)))
-plt.title('Butterworth filter frequency response')
-plt.xlabel('Frequency Hz')
-plt.ylabel('Amplitude [dB]')
-plt.margins(0, 0.1)
-plt.grid(which='both', axis='both')
-#plt.axvline(f_cutoff, color='green')  # cutoff frequency
-plt.show()
-print('toto')
+
+def butter_bandpass_filter(input, cutoff, fs, order):
+    [b, a] = signal.butter(order, cutoff, fs=fs, btype='bandpass', analog=False)
+    y = signal.lfilter(b, a, input)
+    return y
+
+
+# The assignments of filter to axis depends on which sensor (accel or gyro) we are considering
+def filter_assign(row):
+    order = 6
+
+    if row['axis'] == 'x':
+        cutoff = sample_freq / 2
+        x_filtered = butter_lowpass_filter(row['sensor_reading'], cutoff, f_sim, order)
+        return x_filtered
+    elif row['axis'] == 'y':
+        cutoff = [sample_freq / 4, 3 * sample_freq / 4]
+        y_filtered = butter_bandpass_filter(row['sensor_reading'], cutoff, f_sim, order)
+        return y_filtered
+    elif row['axis'] == 'z':
+        cutoff = sample_freq / 2
+        z_filtered = butter_lowpass_filter(row['sensor_reading'], cutoff, f_sim, order)
+        return z_filtered
+
+
 # == Functions ==
 def load_prepare(raw_data, n_ids=0):
     # Load in sensor data
@@ -106,7 +97,6 @@ def load_prepare(raw_data, n_ids=0):
     big_data_column_names = ['subjectid', 'activity', 'timestamp', 'x', 'y', 'z']
     df_big_data = pd.concat(big_data)
     df_big_data.columns = big_data_column_names
-    # df_big_data.dropna(axis=0, how="any", subset=None, inplace=True)
     df_big_data.dropna(axis=0, how="any", inplace=True)
     df_big_data = df_big_data.replace('\n', '', regex=True)
     df_big_data = df_big_data.astype({"subjectid": str})
@@ -202,27 +192,22 @@ def slice_and_drop(prepared_data, min_slices_per_activity):
     return df_prepared_data
 
 
-def analogue_filter_assign(row):
-
-    filtered = 'lol'
-
-    return filtered
-
-
 def quantise_assign(row):
     bit_depth = 12
     dec_points = 5
-    quantised = quantiser(row, bit_depth, axis=1, dec_points=dec_points)
+    quantised = quantiser(row['filtered'], bit_depth, axis=1, dec_points=dec_points)
     return quantised
 
+
+# == Simulation ==
 
 three_act_list, three_act_array = three_activity_selection(nhoa_arr, ghoa_arr, ehoa_arr)
 loaded_prepared_data, act_label_list = load_prepare(sensor_list, n_subject_ids)
 df_data = slice_and_drop(loaded_prepared_data, min_slices)
-df_data['analog_filtered'] = df_data.apply(lambda row: analogue_filter_assign(row), axis=1)
-df_data['analog_filtered_quantised'] = df_data.apply(lambda row: quantise_assign(row), axis=1)
+df_data['filtered'] = df_data.apply(lambda row: filter_assign(row), axis=1)
+df_data['filtered_quantised'] = df_data.apply(lambda row: quantise_assign(row), axis=1)
 
-extracted_features, feature_names = extract_features(np.stack(df_data['compressive_measurements']), shape=0,
+extracted_features, feature_names = extract_features(np.stack(df_data['filtered_quantised']), shape=0,
                                                      axis=1)  # Convert pd.Series of arrays into single big np.array
 df_data[feature_names] = extracted_features
 
@@ -239,11 +224,11 @@ for uniq_timestamp in df_data['timestamp'].unique():
 
 three_axis_feature_names = [letter + feature_name for letter in ['x_', 'y_', 'z_'] for feature_name in feature_names]
 feature_dataset_columns = ['subjectid', 'activity'] + three_axis_feature_names
-feature_dataset = data = np.squeeze(np.array(three_axis_feature_list))
+feature_dataset = np.squeeze(np.array(three_axis_feature_list))
 df_feature_dataset = pd.DataFrame({'subjectid': three_axis_subject_list, 'activity': three_axis_activity_list})
 df_feature_dataset[three_axis_feature_names] = feature_dataset
 
-for three_act_group in three_act_list[0:4]:
+for three_act_group in three_act_list:
 
     df_three_act_dataset = df_feature_dataset[df_feature_dataset['activity'].isin(three_act_group)]
     labels = df_three_act_dataset["activity"]
@@ -298,11 +283,11 @@ for three_act_group in three_act_list[0:4]:
     count_track_var = count_track_var + 1
 
 df_output_log = pd.DataFrame(
-    zip(three_act_array[:4, 0], three_act_array[:4, 1], three_act_array[:4, 2], total_accuracy_list),
+    zip(three_act_array[:, 0], three_act_array[:, 1], three_act_array[:, 2], total_accuracy_list),
     columns=['non_hand', 'general_hand', 'eating_hand',
              'total_accuracy'])
 
-df_output_log.to_excel('makethisdependoninputvars.xlsx')
+df_output_log.to_excel('output_log.xlsx')
 
 with open("log.txt", "a") as text_file:
     text_file.write("finished")
