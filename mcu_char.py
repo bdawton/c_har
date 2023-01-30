@@ -1,6 +1,7 @@
 import glob
 import numpy as np
 import pandas as pd
+import modified_emlearn
 import tailored_prs as prs
 from quantiser import quantiser
 from scipy import signal
@@ -14,16 +15,16 @@ import random as rnd
 
 # Non-hand-oriented activities:
 nhoa_dict = {0: 'Walking', 1: 'Jogging', 2: 'Stairs', 3: 'Sitting', 4: 'Standing', 11: 'Kicking'}
-nhoa_arr = np.array([0, 1, 2, 3, 4, 11])
+nhoa_arr = np.array([0])
 
 # General hand-oriented activities:
 ghoa_dict = {5: 'Typing', 6: 'Brushing Teeth', 12: 'Playing Catch', 13: 'Dribbling Ball', 14: 'Writing', 15: 'Clapping',
              16: 'Folding Clothes'}
-ghoa_arr = np.array([5, 6, 12, 13, 14, 15, 16])
+ghoa_arr = np.array([5])
 
 # Eating hand-oriented activities:
 ehoa_dict = {7: 'Eating Soup', 8: 'Eating Chips', 9: 'Eating Pasta', 10: 'Drinking', 17: 'Eating Sandwich'}
-ehoa_arr = np.array([7, 8, 9, 10, 17])
+ehoa_arr = np.array([9])
 
 # == Variables used in simulation ==
 
@@ -43,7 +44,7 @@ min_slices = 10
 count_track_var = 1
 final_count_track_var = len(nhoa_arr) * len(ghoa_arr) * len(ehoa_arr)
 total_accuracy_list = []
-validation_iter = 10
+validation_iter = 1
 
 sensor_list = glob.glob('wisdm-dataset-modified/raw/watch/accel' + '/*')
 
@@ -243,59 +244,89 @@ feature_dataset = np.squeeze(np.array(three_axis_feature_list))
 df_feature_dataset = pd.DataFrame({'subjectid': three_axis_subject_list, 'activity': three_axis_activity_list})
 df_feature_dataset[three_axis_feature_names] = feature_dataset
 
-for three_act_group in three_act_list:
+#df_c_mea = df_data[['axis','compressive_measurements']]
+df_c_mea = df_data[['subjectid','axis','sensor_reading']]
 
-    df_three_act_dataset = df_feature_dataset[df_feature_dataset['activity'].isin(three_act_group)]
-    labels = df_three_act_dataset["activity"]
-    sub_ids = df_three_act_dataset["subjectid"]
-    features = df_three_act_dataset[three_axis_feature_names]
-    sub_ids_list = sub_ids.unique()
 
-    final_conf_mat = np.zeros([np.size(np.unique(labels)), np.size(np.unique(labels))], dtype=int)
+# This is a rough and ready way of obtaining the necessary information for the MCU implementation, with a bit of fudging. Future work includes an elegant rewrite.
 
-    for iteration in range(validation_iter):
-        pull_index = 0
-        iter_conf_mat = np.zeros([np.size(np.unique(labels)), np.size(np.unique(labels))], dtype=int)
 
-        for s_id in sub_ids_list:
-            pull_list = np.delete(sub_ids_list, pull_index)
-            X_train = features[sub_ids.isin(pull_list)]
-            X_test = features[
-                sub_ids.isin([s_id])]  # Use [] to make s_id list and use with .isin so it outputs dataframe
-            y_train = labels[sub_ids.isin(pull_list)]
-            y_test = labels[
-                sub_ids.isin([s_id])]  # Use [] to make s_id list and use with .isin so it outputs dataframe
-            print(f'iter: {iteration}')
-            print(f's_id: {s_id}')
-            print(f"pull_list: {pull_list}")
-            model = RandomForestClassifier(
-                n_estimators=1000,
-                min_samples_leaf=3,
-                random_state=r_s,
-                n_jobs=-1,
-            )
+for ax in ['x','y','z']: # This is inherently inefficient, and will be rewritten as mentionned above.
 
-            score, conf_mat, fit_model, y_pred, y_true, unused_var = validate(X_train, y_train, X_test,
-                                                                              y_test, model,
-                                                                              random_state=r_s)
-            iter_conf_mat += conf_mat
-            pull_index = pull_index + 1
-        final_conf_mat += iter_conf_mat
 
-    total_accuracy = iter_conf_mat.diagonal().sum() / iter_conf_mat.sum()
-    total_accuracy_list.append(total_accuracy)
-    print('total accuracy: ')
-    print(total_accuracy)
 
-    print(f"progress: {count_track_var} out of {final_count_track_var}")
+    for three_act_group in three_act_list:
 
-    with open("log.txt", "a") as text_file:
-        text_file.write(f"activities: {three_act_group}")
-        text_file.write("\n")
-        text_file.write(f"progress: {count_track_var} out of {final_count_track_var}")
-        text_file.write("\n")
 
-    count_track_var = count_track_var + 1
+        df_three_act_dataset = df_feature_dataset[df_feature_dataset['activity'].isin(three_act_group)]
+        labels = df_three_act_dataset["activity"]
+        sub_ids = df_three_act_dataset["subjectid"]
+        features = df_three_act_dataset[three_axis_feature_names]
+        sub_ids_list = sub_ids.unique()
+        c_mea_all = df_c_mea[df_data['activity'].isin(three_act_group)]
+        c_mea_in = c_mea_all[c_mea_all['axis']==ax]
+        c_mea_in['new'] = np.array(features.index)
+        c_mea_in.set_index('new', drop = True, inplace=True)
+
+        final_conf_mat = np.zeros([np.size(np.unique(labels)), np.size(np.unique(labels))], dtype=int)
+
+        for iteration in range(validation_iter):
+            pull_index = 0
+            iter_conf_mat = np.zeros([np.size(np.unique(labels)), np.size(np.unique(labels))], dtype=int)
+
+            for s_id in sub_ids_list:
+                pull_list = np.delete(sub_ids_list, pull_index)
+                X_train = features[sub_ids.isin(pull_list)]
+                X_test = features[
+                    sub_ids.isin([s_id])]  # Use [] to make s_id list and use with .isin so it outputs dataframe
+                y_train = labels[sub_ids.isin(pull_list)]
+                y_test = labels[
+                    sub_ids.isin([s_id])]  # Use [] to make s_id list and use with .isin so it outputs dataframe
+                c_mea_test = c_mea_in[sub_ids.isin([s_id])]
+
+                print(f'iter: {iteration}')
+                print(f's_id: {s_id}')
+                print(f"pull_list: {pull_list}")
+                model = RandomForestClassifier(
+                    n_estimators=100,
+                    min_samples_leaf=3,
+                    random_state=r_s,
+                    n_jobs=-1,
+                )
+
+                score, conf_mat, fit_model, y_pred, y_true, c_mea_resamp = validate(X_train, y_train, X_test,
+                                                                                y_test, model, c_mea_test,
+                                                                                random_state=r_s)
+
+
+                """# Export for MCU"""
+                # Export resampled labels and corresponding compressive measurements to text file
+                np.savetxt('lab_' + str(s_id) + '.txt', y_true, delimiter=",", fmt='%i')  # Save labels to text file
+                float_fix = np.vstack(c_mea_resamp.sensor_reading.values[:]).astype('float64')
+                np.savetxt(str(c_mea_resamp.axis[0])+ 'c_mea_' + str(s_id) + '.txt', float_fix, delimiter=",",fmt='%f')  # Save compressive measurements to text file
+
+                # Port classifier to C and export as .h file
+                rf_c_code = modified_emlearn.convert(fit_model, method='inline')
+                rf_c_code.save(file='classifier_to_test_' + str(s_id) + '.h')
+
+                iter_conf_mat += conf_mat
+                pull_index = pull_index + 1
+            final_conf_mat += iter_conf_mat
+
+        total_accuracy = iter_conf_mat.diagonal().sum() / iter_conf_mat.sum()
+        total_accuracy_list.append(total_accuracy)
+        print('total accuracy: ')
+        print(total_accuracy)
+
+        print(f"progress: {count_track_var} out of {final_count_track_var}")
+
+        with open("log.txt", "a") as text_file:
+            text_file.write(f"activities: {three_act_group}")
+            text_file.write("\n")
+            text_file.write(f"progress: {count_track_var} out of {final_count_track_var}")
+            text_file.write("\n")
+
+        count_track_var = count_track_var + 1
 
 df_output_log = pd.DataFrame(
     zip(three_act_array[:, 0], three_act_array[:, 1], three_act_array[:, 2], total_accuracy_list),
