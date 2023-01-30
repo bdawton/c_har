@@ -244,8 +244,8 @@ feature_dataset = np.squeeze(np.array(three_axis_feature_list))
 df_feature_dataset = pd.DataFrame({'subjectid': three_axis_subject_list, 'activity': three_axis_activity_list})
 df_feature_dataset[three_axis_feature_names] = feature_dataset
 
-#df_c_mea = df_data[['axis','compressive_measurements']]
-df_c_mea = df_data[['subjectid','axis','sensor_reading']]
+df_c_mea = df_data[['axis','compressive_measurements']] # This line outputs the compressive measurements as text files for MCU
+#df_c_mea = df_data[['subjectid','axis','sensor_reading']] # This line outputs the full original signals as text files for MCU
 
 
 # This is a rough and ready way of obtaining the necessary information for the MCU implementation, with a bit of fudging. Future work includes an elegant rewrite.
